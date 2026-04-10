@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { Download, Play, X, Code, FileText, ChartBar, Table, List, Activity, User, MapPin } from 'lucide-react';
+import { Download, Play, X, FileText, ChartBar, Table, List, Activity, User, MapPin } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { parseExcelFile } from './utils/excelParser';
 import { analyzeTextLocally, segmentText, parseStopWords, extractKeywordsLocally, calculateEntropy } from './utils/segmentation';
@@ -9,14 +9,11 @@ import initJieba, { tag as jiebaTag } from 'jieba-wasm';
 // Deep path: jieba-wasm package exports do not expose the .wasm file to the bundler.
 import jiebaWasmUrl from './node_modules/jieba-wasm/pkg/web/jieba_rs_wasm_bg.wasm?url';
 
-// --- PYTHON CODE TEMPLATE ---
-// Updated to support POS Exclusion logic within Stop Words section
-// Updated to use system temp directory to avoid permission errors
-import { PYTHON_CODE } from './pythonTemplate';
-
 const DEFAULT_STOP_WORDS_DISPLAY = "的,了,是,我,你,在,和,就,都,而,及,与,这,那,有,个,之,为,但,我们,公司,有限公司,\n，,。,！,？,、,“, ”,：,；";
 
 type PreviewMode = 'stats' | 'segmentation' | 'row_keywords' | 'tfidf' | 'entropy' | 'ner_person' | 'ner_location' | null;
+
+const SETTINGS_STORAGE_KEY = 'jieba-analyzer:settings:v1';
 
 interface PreviewRow {
   col1: string | number;
@@ -33,6 +30,27 @@ export interface PosExclusions {
   adv: boolean;
   prep: boolean;
   particle: boolean;
+}
+
+function detectTauriRuntime(): boolean {
+  try {
+    if (isTauri()) return true;
+  } catch {
+    // ignore
+  }
+
+  // Fallbacks: depending on bundling and API init timing, isTauri() may be false.
+  const w = window as unknown as Record<string, unknown>;
+  if (w && (w.__TAURI_INTERNALS__ || w.__TAURI__)) return true;
+
+  const proto = window.location?.protocol || '';
+  if (proto.startsWith('tauri')) return true;
+
+  // Last resort heuristic.
+  const ua = navigator.userAgent || '';
+  if (ua.toLowerCase().includes('tauri')) return true;
+
+  return false;
 }
 
 export default function App() {
@@ -68,6 +86,71 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState<PreviewMode>(null);
   const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
   const [jiebaReady, setJiebaReady] = useState(false);
+
+  // Load persisted settings once.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<{
+        customStopWords: string;
+        customFixedWords: string;
+        filterEnglish: boolean;
+        filterNumbers: boolean;
+        minWordCount: number;
+        maxWordCount: number;
+        posExclusions: PosExclusions;
+      }>;
+
+      if (typeof parsed.customStopWords === 'string') setCustomStopWords(parsed.customStopWords);
+      if (typeof parsed.customFixedWords === 'string') setCustomFixedWords(parsed.customFixedWords);
+      if (typeof parsed.filterEnglish === 'boolean') setFilterEnglish(parsed.filterEnglish);
+      if (typeof parsed.filterNumbers === 'boolean') setFilterNumbers(parsed.filterNumbers);
+      if (typeof parsed.minWordCount === 'number') setMinWordCount(parsed.minWordCount);
+      if (typeof parsed.maxWordCount === 'number') setMaxWordCount(parsed.maxWordCount);
+      if (parsed.posExclusions && typeof parsed.posExclusions === 'object') {
+        setPosExclusions({
+          noun: !!parsed.posExclusions.noun,
+          verb: !!parsed.posExclusions.verb,
+          adj: !!parsed.posExclusions.adj,
+          adv: !!parsed.posExclusions.adv,
+          prep: !!parsed.posExclusions.prep,
+          particle: !!parsed.posExclusions.particle,
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load persisted settings', e);
+    }
+  }, []);
+
+  // Persist settings (debounced) whenever they change.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        const payload = {
+          customStopWords,
+          customFixedWords,
+          filterEnglish,
+          filterNumbers,
+          minWordCount,
+          maxWordCount,
+          posExclusions,
+        };
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload));
+      } catch (e) {
+        console.warn('Failed to persist settings', e);
+      }
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [
+    customStopWords,
+    customFixedWords,
+    filterEnglish,
+    filterNumbers,
+    minWordCount,
+    maxWordCount,
+    posExclusions,
+  ]);
 
   useEffect(() => {
     initJieba(jiebaWasmUrl).then(() => {
@@ -376,55 +459,28 @@ export default function App() {
     }
   };
 
-  const downloadPythonScript = async () => {
-    try {
-      if (isTauri()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
-        const { writeFile } = await import('@tauri-apps/plugin-fs');
-        const path = await save({
-          defaultPath: 'analyzer.py',
-          filters: [{ name: 'Python', extensions: ['py'] }],
-        });
-        if (!path) return;
-        await writeFile(path, new TextEncoder().encode(PYTHON_CODE));
-      } else {
-        const blob = new Blob([PYTHON_CODE], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'analyzer.py';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      }
-    } catch (e) {
-      console.error(e);
-      alert("保存失败，请重试");
-    }
-  };
+  const runningInTauri = detectTauriRuntime();
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 font-sans bg-gray-800">
-      
-      {/* Main Window */}
-      <div className="w-[1000px] h-[850px] bg-[#f0f2f5] shadow-2xl rounded-sm border border-gray-400 flex flex-col overflow-hidden relative">
-        
-        {/* Title Bar */}
-        <div className="h-8 bg-white border-b border-gray-300 flex items-center justify-between px-3 select-none">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-green-600 rounded-sm"></div>
-            <span className="text-sm font-semibold text-gray-700">Excel 分词统计工具 (Web 版)</span>
-          </div>
-          <div className="flex gap-2">
-            <div className="w-3 h-3 rounded-full bg-gray-300"></div>
-            <div className="w-3 h-3 rounded-full bg-gray-300"></div>
-            <div className="w-3 h-3 rounded-full bg-red-400 cursor-pointer hover:bg-red-500"></div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
+    <div
+      className={
+        runningInTauri
+          ? 'h-screen w-screen flex flex-col overflow-hidden bg-[#f0f2f5] font-sans'
+          : 'min-h-screen flex items-center justify-center p-4 font-sans bg-gray-800'
+      }
+    >
+      {/* 历史原因：原网页在页面内模拟“桌面窗口标题栏”，打包成桌面应用后会造成“套框”观感。
+          这里统一移除内层假标题栏，避免任何环境下出现双标题栏。 */}
+      <div
+        className={
+          runningInTauri
+            ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+            : 'relative flex h-[850px] w-[1000px] flex-col overflow-hidden rounded-sm border border-gray-400 bg-[#f0f2f5] shadow-2xl'
+        }
+      >
+        <div
+          className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto ${runningInTauri ? 'p-3' : 'p-4'}`}
+        >
           
           {/* Section 1: Data Source */}
           <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
@@ -785,17 +841,6 @@ export default function App() {
                      </div>
                    </button>
                    
-                   <div className="mt-auto border-t border-gray-200 pt-3">
-                        <button
-                            onClick={() => void downloadPythonScript()}
-                            className="w-full py-2 bg-blue-600 text-white font-bold rounded shadow-sm flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors"
-                        >
-                             <Code size={18} /> 下载 Python 独立工具源码
-                        </button>
-                        <p className="text-[10px] text-gray-500 text-center mt-1">
-                          (包含完整 GUI 和本地化处理逻辑)
-                        </p>
-                   </div>
                </div>
 
             </div>

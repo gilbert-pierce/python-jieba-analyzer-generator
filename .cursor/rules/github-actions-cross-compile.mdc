@@ -1,0 +1,48 @@
+---
+description: GitHub Actions 交叉编译（Tauri Windows x64 离线 exe）自检与修复清单
+alwaysApply: true
+---
+
+# GitHub Actions 交叉编译自检（Tauri / Win10 x64 / 离线）
+
+当用户提出“通过 GitHub Actions 编译/交叉编译/打包成 Win10 x64 可离线运行的 exe（Tauri）”时，在生成/修改相关文件（workflow、Tauri 配置、前端导出逻辑、静态资源）过程中必须做一次自检；若命中常见问题，直接修正到代码里，而不是只给建议。
+
+## 必检项（命中即修）
+
+- **Action 版本坑**
+  - 若使用 `tauri-apps/tauri-action@v1` 报 *Unable to resolve action*：不要用该 tag；可改用 `actions/*` + `npm run tauri build` 路线，或选择已存在的可用 action tag。
+  - 若 action 报 *Unexpected input(s)*：删除无效 inputs，改用 `actions/upload-artifact@v4` 上传产物。
+
+- **npm scripts**
+  - 若 CI 报 *Missing script: "tauri"*：在 `package.json` 添加 `"tauri": "tauri"`（以及可选的 `tauri:build/tauri:dev`）。
+
+- **MSI/WiX 不稳定（light.exe）**
+  - 若 Windows runner 打 MSI 失败：在 `src-tauri/tauri.conf.json` 将 `bundle.targets` 改为仅 `["nsis"]`（产出 `setup.exe`）。
+
+- **Artifacts 路径**
+  - 若上传产物报 *No files were found... bundle*：上传路径用 `src-tauri/target/**/release/bundle/`（兼容 `target/release` 与 `target/x86_64-pc-windows-msvc/release`）。
+
+- **Tauri 下导出/下载不可用（XLSX.writeFile）**
+  - 若 exe 可跑但“导出分析结果”失败：在 Tauri 环境改用 `@tauri-apps/plugin-dialog` 的 `save()` + `@tauri-apps/plugin-fs` 的 `writeFile()`；浏览器环境仍保留 `XLSX.writeFile()`。
+  - 同理，“下载/保存 analyzer.py”在 Tauri 下也必须走 save + writeFile。
+  - 同步修 `src-tauri/src/lib.rs` 注册插件，以及 `src-tauri/capabilities/*.json` 添加 `dialog:default` 与 `fs:*` 权限（含 scope）。
+
+- **tsc 扫到 Rust 构建产物**
+  - 若 `tsc`/lint 误扫到 `src-tauri/target`：在 `tsconfig.json` 增加 `exclude: ["src-tauri", "dist", "node_modules"]` 或收紧 `include`。
+
+- **Windows checkout 失败：非法文件名**
+  - 若 checkout 报 *invalid path* 且路径含 `:`：重命名相关文件（把 `:` 改为 `-` 或 `_`），并将仅本地需要的目录加入 `.gitignore` 防止再提交。
+
+- **Windows 资源编译失败：RC2176 old DIB（icon.ico）**
+  - 若 `rc.exe` 报 old DIB：用合法 PNG（建议 1024×1024）重新生成图标：`npx tauri icon <png> -o src-tauri/icons`。
+
+- **离线运行仍请求外网（静态资源）**
+  - 若 `index.html` 含 `cdn.tailwindcss.com` / `fonts.googleapis.com` / importmap 外链：全部移除，改为 Tailwind 构建产物（如 `tailwindcss` + `@tailwindcss/vite`），并设置 Vite `base: './'` 以适配 Tauri 资源加载。
+
+- **Tauri “套框”（双标题栏）**
+  - 若桌面窗口外层已有系统标题栏，而页面内部还模拟了“Web 版标题栏/窗口控件”：在 `isTauri()` 下隐藏内层模拟标题栏并让内容铺满窗口；可选统一 `tauri.conf.json` 的 `windows[].title` 文案。
+
+## 输出要求
+
+- 任何修复都应落到具体文件变更（workflow / `tauri.conf.json` / `App.tsx` / `tsconfig.json` 等）。
+- 修改后尽量在本机验证：`npm run lint`、`npm run build`、`npm run tauri build`（至少其一与变更相关的命令）。

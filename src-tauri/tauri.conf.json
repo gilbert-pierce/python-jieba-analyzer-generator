@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "jieba-analyzer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.jieba.analyzer",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Jieba Analyzer",
+        "title": "Excel 分词统计工具",
         "width": 1280,
         "height": 900,
         "resizable": true,
@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
