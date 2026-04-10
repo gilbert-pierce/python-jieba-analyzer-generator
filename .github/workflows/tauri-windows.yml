@@ -1,0 +1,45 @@
+# Win10/11 x64：在 Windows runner 上编 NSIS 安装包（setup.exe），避免 WiX/light.exe 不稳定问题。
+# 产物路径可能是 target/release/bundle 或 target/x86_64-pc-windows-msvc/release/bundle，故用 ** 通配上传。
+
+name: Tauri Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Rust stable (x86_64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build Tauri (release, NSIS)
+        run: npm run tauri build
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-windows-x64-nsis
+          path: src-tauri/target/**/release/bundle/

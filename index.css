@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background-color: #f3f4f6;
+}
+
+pre {
+  font-family: ui-monospace, Menlo, Monaco, "Courier New", monospace;
+}

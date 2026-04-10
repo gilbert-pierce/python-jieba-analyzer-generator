@@ -1,0 +1,5 @@
+{
+  "name": "Python Jieba Analyzer Generator",
+  "description": "Generates Python code and packaging instructions for a local offline Jieba word frequency analyzer application.",
+  "requestFramePermissions": []
+}
